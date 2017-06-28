@@ -1,9 +1,10 @@
 'use strict';
 
 const pogobuf = require('pogobuf-vnext'),
-  POGOProtos = require('node-pogo-protos'),
+  POGOProtos = require('node-pogo-protos-vnext'),
   PoGo = require('./lib/pogo'),
   Gym = require('./lib/gym'),
+  RaidBoss = require('./lib/raidboss'),
   moment = require('moment-timezone'),
   prettyMs = require('pretty-ms'),
   fs = require('mz/fs'),
@@ -81,9 +82,11 @@ async function scanGym(gymRow) {
       const raidEnd = moment(raidInfo.raid_end_ms).tz(Config.timezone).format('YYYY-MM-DD HH:mm');
 
       let raidMsg = '<b>';
+      let pokemonName = '';
       let raidMove1;
       let raidMove2;
       let moveset = '';
+      let weakness = '';
 
       if (raidInfo.raid_level > 3) {
         notify = true;
@@ -92,17 +95,20 @@ async function scanGym(gymRow) {
       message = `<b>${gym.name}</b>\n`;
       message += `${team} (${timeOccupied})\n`;
 
-      if (raidInfo.raid_pokemon) {
+      if (raidInfo.raid_pokemon && raidInfo.raid_level > 1) {
         notify = true;
 
+        pokemonName = pogobuf.Utils.getEnumKeyByValue(POGOProtos.Enums.PokemonId, raidInfo.raid_pokemon.pokemon_id);
         raidMove1 = pogobuf.Utils.getEnumKeyByValue(POGOProtos.Enums.PokemonMove, raidInfo.raid_pokemon.move_1);
         raidMove2 = pogobuf.Utils.getEnumKeyByValue(POGOProtos.Enums.PokemonMove, raidInfo.raid_pokemon.move_2);
 
         raidMove1 = raidMove1.replace(/\s+/g, '');
+        raidMove1 = raidMove1.replace('Fast', '');
         raidMove2 = raidMove2.replace(/\s+/g, '');
         moveset = `${raidMove1}/${raidMove2}`;
+        weakness = RaidBoss.getWeakness(pokemonName);
 
-        raidMsg += pogobuf.Utils.getEnumKeyByValue(POGOProtos.Enums.PokemonId, raidInfo.raid_pokemon.pokemon_id) + ' - ';
+        raidMsg += `${pokemonName}  - `;
       }
 
       raidMsg += `Level ${raidInfo.raid_level}</b>\n`;
@@ -110,6 +116,7 @@ async function scanGym(gymRow) {
       if (raidInfo.raid_pokemon) {
         raidMsg += `<b>CP: ${raidInfo.raid_pokemon.cp}</b>\n`;
         raidMsg += `<b>MS: ${moveset}</b>\n`;
+        raidMsg += `Weakness: ${weakness}\n`;
       }
 
       raidMsg += `Start: ${raidStart}\n`;
@@ -222,13 +229,16 @@ async function Main() {
   for (const gymRow of gymData) {
     logger.info(`Scanning gym at ${gymRow.latitude}, ${gymRow.longitude}`);
     await scanGym(gymRow);
-    await sleep(2000);
+    await sleep(4000);
   }
 }
 
-Main()
-  .then(() => {
-    logger.info('Done scanning');
-    process.exit();
-  })
-  .catch(e => console.error(e));
+
+logger.info(`Sleeping for ${Config.intervalMinutes} before scanning`);
+
+setInterval(() => {
+  Main()
+    .catch(e => console.error(e));
+
+  logger.info(`Sleeping for ${Config.intervalMinutes} before next scan`);
+}, Config.intervalMinutes * 60 * 1000);
